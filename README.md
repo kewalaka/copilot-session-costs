@@ -6,11 +6,16 @@ A GitHub Copilot App canvas extension that lists your Copilot sessions and shows
 
 ## Install
 
-In the Copilot App, ask the agent to run `install_extension` with:
+**Ask an agent:**
 
-`https://github.com/kewalaka/copilot-session-costs`
+> Install the extension from https://gist.github.com/kewalaka/dc801a20efd8a9dec6319df1dc83f7ed to user scope.
 
-Choose user scope, then open the "Session costs" canvas.
+**Manual:**
+
+- Open the Canvas menu → Discover more → Import canvas from gist/URL
+- Paste `https://gist.github.com/kewalaka/dc801a20efd8a9dec6319df1dc83f7ed`
+- Choose User scope (~/.copilot)
+- Open the "Session costs" canvas
 
 ## Caveats
 
