@@ -2,6 +2,8 @@
 
 A GitHub Copilot App canvas extension that lists your Copilot sessions and shows cost (AIU / USD), rate of change (last call, last 10, last hour), totals (today, yesterday, 3/7/30 days), parent/child grouping and per-model token breakdowns.
 
+![Session costs (dummy data)](docs/screenshot.png)
+
 ## Install
 
 In the Copilot App, ask the agent to run `install_extension` with:
