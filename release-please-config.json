@@ -3,7 +3,8 @@
   "packages": {
     ".": {
       "release-type": "simple",
-      "package-name": "copilot-session-costs"
+      "package-name": "copilot-session-costs",
+      "include-component-in-tag": false
     }
   }
 }

@@ -27,13 +27,13 @@ const refresh = () => {
   for (const d of readdirSync(`${root}/session-state`, { withFileTypes: true })) {
     if (!d.isDirectory()) continue;
     const file = `${root}/session-state/${d.name}/events.jsonl`;
-    let m;
-    try { m = statSync(file).mtimeMs; } catch { continue; }
+    let m, text;
+    try { m = statSync(file).mtimeMs; text = readFileSync(file, "utf8"); } catch { continue; }
     if (seen.get(d.name) === m) continue;
     seen.set(d.name, m);
     const cutoff = cutoffs.get(d.name) ?? "";
     db.prepare(`DELETE FROM assistant_usage_events WHERE session_id = ? AND created_at > ?`).run(d.name, cutoff);
-    for (const line of readFileSync(file, "utf8").split("\n")) {
+    for (const line of text.split("\n")) {
       if (!line.includes('"session.usage_record"')) continue;
       try {
         const e = JSON.parse(line);
