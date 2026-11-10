@@ -5,7 +5,7 @@ input{width:calc(100% - 16px);margin:8px;padding:6px;background:#161b22;color:in
 .s{padding:8px 12px;border-bottom:1px solid #21262d;cursor:pointer}.s:hover,.s.a{background:#161b22}
 .m{color:#8b949e;font-size:11px}.c{float:right;font-weight:600;color:#3fb950}
 .big{font-size:32px;font-weight:700;color:#3fb950}table{border-collapse:collapse;width:100%;margin-top:12px}td,th{padding:4px 8px;text-align:right;border-bottom:1px solid #21262d}th:first-child,td:first-child{text-align:left}</style>
-<div id=l><div id=tot style="padding:10px 12px;border-bottom:1px solid #30363d"></div><input id=q placeholder="Filter sessions…"><div id=list></div></div><div id=r>Pick a session</div>
+<div id=l><div id=tot style="padding:10px 12px;border-bottom:1px solid #30363d"></div><div style="display:flex;align-items:center"><input id=q placeholder="Filter sessions…" style="flex:1;width:auto"><button id=rf title="Refresh" style="margin:8px 8px 8px 0;padding:5px 9px;background:#161b22;color:inherit;border:1px solid #30363d;border-radius:6px;cursor:pointer">⟳</button></div><div id=list></div></div><div id=r>Pick a session</div>
 <script>
 let rate=.01,all=[],sel='win0';const f=n=>n.toLocaleString(),$=id=>document.getElementById(id);
 let WIN=[];
@@ -52,5 +52,5 @@ return`<h4>Rate of change</h4><table><tr><th>Window<th>Calls<th>Cost<th>Avg/call
 <div class=m style="margin-top:8px">Burn rate (active span in last hr): ${span>.01?$$(hr/span)+'/hr':'n/a'} · idle for ${Math.round((now-new Date(cl[0].t))/6e4)} min</div>
 <div class=m style="margin-top:10px">Cost per call, last 40 (oldest → newest)</div><div style="height:44px;display:flex;align-items:flex-end;margin-top:4px">${bars}</div>
 <h4>Recent calls</h4><table><tr><th>Time<th>Model<th>In<th>Out<th>Cost</tr>${cl.slice(0,10).map(r=>`<tr><td>${new Date(r.t).toLocaleTimeString()}<td>${r.model||'(unknown)'}<td>${f(r.inp)}<td>${f(r.outp)}<td>${$$(r.aiu*rate)}</tr>`).join('')}</table>`}
-$('q').oninput=draw;load();setInterval(load,30000);
+$('q').oninput=draw;$('rf').onclick=load;load();setInterval(load,30000);
 </script>

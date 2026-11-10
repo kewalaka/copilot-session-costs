@@ -1,12 +1,49 @@
 import { createServer } from "node:http";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { joinSession, createCanvas } from "@github/copilot-sdk/extension";
 
 const AIU_USD = 0.01;
 const dir = new URL(".", import.meta.url);
-const db = new DatabaseSync(`${homedir()}/.copilot/session-store.db`, { readOnly: true });
+const root = `${homedir()}/.copilot`;
+const store = new DatabaseSync(`${root}/session-store.db`, { readOnly: true });
+
+// Newer Copilot builds stopped writing assistant_usage_events to session-store.db and only
+// record usage as session.usage_record events in each session's events.jsonl. Merge both.
+const db = new DatabaseSync(":memory:");
+db.exec(`CREATE TABLE assistant_usage_events (session_id TEXT, model TEXT, input_tokens INT, output_tokens INT,
+  cache_read_tokens INT, cache_write_tokens INT, total_nano_aiu INT, duration_ms INT, created_at TEXT);
+  CREATE INDEX ix_session ON assistant_usage_events(session_id);
+  ATTACH DATABASE '${`${root}/session-store.db`.replaceAll("'", "''")}' AS s;
+  INSERT INTO assistant_usage_events SELECT session_id, model, input_tokens, output_tokens, cache_read_tokens,
+    cache_write_tokens, total_nano_aiu, duration_ms, created_at FROM s.assistant_usage_events;
+  DETACH DATABASE s;`);
+const cutoff = db.prepare(`SELECT COALESCE(max(created_at), '') c FROM assistant_usage_events`).get().c;
+const seen = new Map();
+const insert = db.prepare(`INSERT INTO assistant_usage_events VALUES (?,?,?,?,?,?,?,?,?)`);
+const refresh = () => {
+  for (const d of readdirSync(`${root}/session-state`, { withFileTypes: true })) {
+    if (!d.isDirectory()) continue;
+    const file = `${root}/session-state/${d.name}/events.jsonl`;
+    let m;
+    try { m = statSync(file).mtimeMs; } catch { continue; }
+    if (seen.get(d.name) === m) continue;
+    seen.set(d.name, m);
+    db.prepare(`DELETE FROM assistant_usage_events WHERE session_id = ? AND created_at > ?`).run(d.name, cutoff);
+    for (const line of readFileSync(file, "utf8").split("\n")) {
+      if (!line.includes('"session.usage_record"')) continue;
+      try {
+        const e = JSON.parse(line);
+        const u = e.data.usage;
+        if (e.type !== "session.usage_record" || e.timestamp <= cutoff) continue;
+        insert.run(d.name, u.model, u.inputTokens ?? 0, u.outputTokens ?? 0, u.cacheReadTokens ?? 0, u.cacheWriteTokens ?? 0,
+          u.copilotUsage?.totalNanoAiu ?? 0, u.duration ?? 0, e.timestamp);
+      } catch { /* skip malformed line */ }
+    }
+  }
+};
+refresh();
 
 const appDb = new DatabaseSync(`${homedir()}/.copilot/data.db`, { readOnly: true });
 const sessions = () => {
@@ -14,7 +51,7 @@ const sessions = () => {
     SELECT session_id id, count(*) calls, sum(total_nano_aiu)/1e9 aiu, max(created_at) last_at
     FROM assistant_usage_events GROUP BY session_id`).all();
   const titles = new Map(appDb.prepare(`SELECT id, title FROM sessions`).all().map((r) => [r.id, r.title]));
-  const summaries = new Map(db.prepare(`SELECT id, summary, repository FROM sessions`).all().map((r) => [r.id, r]));
+  const summaries = new Map(store.prepare(`SELECT id, summary, repository FROM sessions`).all().map((r) => [r.id, r]));
   const parents = new Map(appDb.prepare(
     `SELECT session_id id, creator_session_id parent FROM workspaces WHERE session_id IS NOT NULL AND creator_session_id IS NOT NULL AND creator_session_id != session_id`).all().map((r) => [r.id, r.parent]));
   const rows = new Map(usage.map((r) => [r.id, r]));
@@ -64,6 +101,7 @@ const servers = new Map();
 async function start() {
   const server = createServer((req, res) => {
     const u = new URL(req.url, "http://x");
+    if (u.pathname.startsWith("/api/")) refresh();
     const json = (rows) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ rate: AIU_USD, rows })); };
     const id = u.searchParams.get("id") ?? "";
     if (u.pathname === "/api/window") {
