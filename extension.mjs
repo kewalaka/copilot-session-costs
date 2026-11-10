@@ -19,7 +19,8 @@ db.exec(`CREATE TABLE assistant_usage_events (session_id TEXT, model TEXT, input
   INSERT INTO assistant_usage_events SELECT session_id, model, input_tokens, output_tokens, cache_read_tokens,
     cache_write_tokens, total_nano_aiu, duration_ms, created_at FROM s.assistant_usage_events;
   DETACH DATABASE s;`);
-const cutoff = db.prepare(`SELECT COALESCE(max(created_at), '') c FROM assistant_usage_events`).get().c;
+// Per-session: only take JSONL events newer than what the store already holds for that session.
+const cutoffs = new Map(db.prepare(`SELECT session_id id, max(created_at) c FROM assistant_usage_events GROUP BY session_id`).all().map((r) => [r.id, r.c]));
 const seen = new Map();
 const insert = db.prepare(`INSERT INTO assistant_usage_events VALUES (?,?,?,?,?,?,?,?,?)`);
 const refresh = () => {
@@ -30,6 +31,7 @@ const refresh = () => {
     try { m = statSync(file).mtimeMs; } catch { continue; }
     if (seen.get(d.name) === m) continue;
     seen.set(d.name, m);
+    const cutoff = cutoffs.get(d.name) ?? "";
     db.prepare(`DELETE FROM assistant_usage_events WHERE session_id = ? AND created_at > ?`).run(d.name, cutoff);
     for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line.includes('"session.usage_record"')) continue;
