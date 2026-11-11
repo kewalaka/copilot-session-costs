@@ -1,56 +1,176 @@
-<!doctype html><meta charset=utf-8><title>Session costs</title>
-<style>body{font:13px system-ui;margin:0;display:flex;height:100vh;background:#0d1117;color:#e6edf3}
+<!doctype html>
+<meta charset="utf-8">
+<title>Session costs</title>
+<style>
+body{font:13px system-ui;margin:0;display:flex;flex-direction:column;height:100vh;background:#0d1117;color:#e6edf3}
+#content{display:flex;flex:1;min-height:0}#update{padding:10px 12px;background:#161b22;border-bottom:1px solid #30363d}#update a{color:#58a6ff;margin-left:10px}#update button{margin-left:10px}
 #l{width:42%;overflow:auto;border-right:1px solid #30363d}#r{flex:1;padding:14px;overflow:auto}
 input{width:calc(100% - 16px);margin:8px;padding:6px;background:#161b22;color:inherit;border:1px solid #30363d;border-radius:6px}
-.s{padding:8px 12px;border-bottom:1px solid #21262d;cursor:pointer}.s:hover,.s.a{background:#161b22}
-.m{color:#8b949e;font-size:11px}.c{float:right;font-weight:600;color:#3fb950}
-.big{font-size:32px;font-weight:700;color:#3fb950}table{border-collapse:collapse;width:100%;margin-top:12px}td,th{padding:4px 8px;text-align:right;border-bottom:1px solid #21262d}th:first-child,td:first-child{text-align:left}</style>
-<div id=l><div id=tot style="padding:10px 12px;border-bottom:1px solid #30363d"></div><input id=q placeholder="Filter sessions…"><div id=list></div></div><div id=r>Pick a session</div>
+.s{padding:8px 12px;border-bottom:1px solid #21262d;cursor:pointer}.s:hover,.s.a,.w:hover{background:#161b22}
+.m{color:#8b949e;font-size:11px;overflow-wrap:anywhere}.c{float:right;font-weight:600;color:#3fb950}
+.big{font-size:32px;font-weight:700;color:#3fb950}.warn{padding:8px 12px;color:#e3b341;border-bottom:1px solid #30363d}
+table{border-collapse:collapse;width:100%;min-width:max-content;margin-top:12px}td,th{padding:4px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid #21262d}th:first-child,td:first-child{text-align:left}
+@media(max-width:800px){
+  #content{flex-direction:column}#l{width:auto;height:34%;min-height:180px;border-right:0;border-bottom:1px solid #30363d}#r{min-height:0}
+  .model-table,.model-table tbody{display:block;min-width:0}.model-table tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid #21262d;padding:4px 0}
+  .model-table tr:first-child{display:none}.model-table td{display:block;padding:4px 8px;white-space:normal;overflow-wrap:anywhere;text-align:left;border:0}
+  .model-table td:first-child{grid-column:span 2}.model-table td:before{content:attr(data-label);display:block;color:#8b949e;font-size:10px}
+}
+</style>
+<div id="update" role="status" hidden>
+  <span id="update-label"></span><a id="release-notes" target="_blank" rel="noopener noreferrer">Release notes</a>
+  <button id="upgrade" type="button">Upgrade via agent</button>
+  <span id="upgrade-status"></span>
+</div>
+<div id="content">
+<div id="l">
+  <div id="tot" style="padding:10px 12px;border-bottom:1px solid #30363d"></div>
+  <div id="warning" class="warn" role="status" hidden></div>
+  <div id="update-error" class="warn" role="status" hidden></div>
+  <div style="display:flex;align-items:center">
+    <input id="q" placeholder="Filter sessions…" aria-label="Filter sessions" style="flex:1;width:auto">
+    <button id="rf" title="Refresh" aria-label="Refresh" style="margin:8px 8px 8px 0;padding:5px 9px;background:#161b22;color:inherit;border:1px solid #30363d;border-radius:6px;cursor:pointer">⟳</button>
+  </div>
+  <div id="list"></div>
+</div>
+<div id="r">Pick a session</div>
+</div>
 <script>
-let rate=.01,all=[],sel='win0';const f=n=>n.toLocaleString(),$=id=>document.getElementById(id);
-let WIN=[];
-async function totals(){const n=new Date(),d=new Date(n.getFullYear(),n.getMonth(),n.getDate()),ago=x=>new Date(n-x*864e5),
-Y=new Date(d-864e5),W=[['Today',d],['Yesterday',Y,d],['3 days',ago(3)],['7 days',ago(7)],['30 days',ago(30)]];
-WIN=W;const r=(await (await fetch('/api/totals?'+W.map(w=>'c='+w[1].toISOString()+(w[2]?'|'+w[2].toISOString():'')).join('&'))).json()).rows;
-$('tot').innerHTML='<style>.w:hover{background:#161b22}</style>'+'<div class=m>All sessions</div><div style="display:flex;gap:14px;margin-top:4px">'+W.map((w,i)=>`<div class=w onclick="showWin(${i})" style="cursor:pointer;padding:2px 4px;border-radius:6px"><div class=m>${w[0]}</div><b style="color:#3fb950">$${(r[i].aiu*rate).toFixed(2)}</b><div class=m>${r[i].calls} calls</div></div>`).join('')+'</div>'}
-async function load(){await totals();const d=await (await fetch('/api/sessions')).json();rate=d.rate;all=d.rows;draw();if(sel)sel.startsWith('win')?showWin(+sel.slice(3)):show(sel,true)}
+let rate=.01,all=[],sel='win0',WIN=[];
+const $=id=>document.getElementById(id),f=n=>n.toLocaleString(),money=n=>'$'+(n*rate).toFixed(2);
+const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const modelKey=m=>JSON.stringify([m.model,m.billing_source,m.provider,m.model_display_name]);
+const source=m=>m.billing_source==='external'?`External${m.provider?' · '+m.provider:''}`:m.billing_source==='copilot'?'Copilot':'Unspecified';
+const model=m=>`${esc(m.model||'(unknown)')}${m.billing_source==='external'&&m.model_display_name&&m.model_display_name!==m.model?`<div class=m title="${esc(m.model_display_name)}">${esc(m.model_display_name.length>32?m.model_display_name.slice(0,29)+'…':m.model_display_name)}</div>`:''}`;
+const priced=(calls,unpriced)=>calls>unpriced;
+function warning(message){$('warning').hidden=!message;$('warning').textContent=message||''}
+async function checkUpdate(){
+  try{
+    const response=await fetch('/api/update'),data=await response.json();
+    if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);
+    $('update-error').hidden=!data.error;$('update-error').textContent=data.error||'';
+    $('update').hidden=!data.update;
+    if(!data.update)return;
+    $('update-label').textContent=`Session costs ${data.update.version} available (installed ${data.currentVersion})`;
+    $('release-notes').href=data.update.notesUrl;
+    $('upgrade').hidden=!data.canUpgrade;
+    $('upgrade').disabled=data.requested;
+    if(data.requested)$('upgrade-status').textContent='Upgrade requested in chat';
+  }catch(error){$('update-error').hidden=false;$('update-error').textContent=`Update check failed: ${error.message}`}
+}
+$('upgrade').onclick=async()=>{
+  $('upgrade').disabled=true;$('upgrade-status').textContent='Requesting upgrade...';
+  try{
+    const response=await fetch('/api/upgrade',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}),data=await response.json();
+    if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);
+    $('upgrade-status').textContent='Upgrade requested in chat';
+  }catch(error){$('upgrade').disabled=false;$('upgrade-status').textContent=`Unable to request upgrade: ${error.message}`}
+};
+async function api(url){
+  const response=await fetch(url),data=await response.json();
+  if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);
+  if(data.warnings)warning(data.warnings.length?`Usage may be incomplete: ${data.warnings.join('; ')}`:'');
+  return data;
+}
+async function totals(){
+  const n=new Date(),d=new Date(n.getFullYear(),n.getMonth(),n.getDate()),ago=x=>new Date(n-x*864e5),y=new Date(d-864e5);
+  WIN=[['Today',d],['Yesterday',y,d],['3 days',ago(3)],['7 days',ago(7)],['30 days',ago(30)]];
+  const data=await api('/api/totals?'+WIN.map(w=>'c='+w[1].toISOString()+(w[2]?'|'+w[2].toISOString():'')).join('&'));
+  rate=data.rate;
+  $('tot').innerHTML='<div class=m>All sessions · Copilot AIU estimate</div><div style="display:flex;gap:14px;margin-top:4px">'+
+    WIN.map((w,i)=>`<div class=w data-window="${i}" style="cursor:pointer;padding:2px 4px;border-radius:6px"><div class=m>${w[0]}</div><b style="color:#3fb950">${priced(data.rows[i].calls,data.rows[i].unpriced_calls)?money(data.rows[i].aiu):'—'}</b><div class=m>${data.rows[i].calls} calls</div></div>`).join('')+
+    '</div><div class=m style="margin-top:6px">External provider charges are not included</div>';
+}
+async function load(){
+  try{
+    await totals();
+    const data=await api('/api/sessions');rate=data.rate;all=data.rows;draw();
+    if(sel)await(sel.startsWith('win')?showWin(+sel.slice(3)):show(sel,true));
+  }catch(error){warning(`Unable to load session usage: ${error.message}`)}
+}
 const open_=new Set();let kids={},byId={};
-function build(){byId={};kids={};all.forEach(s=>{byId[s.id]=s;kids[s.id]=[]});
-all.forEach(s=>{if(s.parent&&byId[s.parent])kids[s.parent].push(s)});
-const roll=s=>{if(s._t!==undefined)return s;s._t=s.aiu;s._n=s.calls;s._l=s.last_at||'';kids[s.id].forEach(k=>{roll(k);s._t+=k._t;s._n+=k._n;if(k._l>s._l)s._l=k._l});return s};all.forEach(s=>{delete s._t});all.forEach(roll)}
-function row(s,d){const k=kids[s.id],has=k.length;
-return`<div class="s ${s.id===sel?'a':''}" style="padding-left:${12+d*16}px" onclick="show('${s.id}')"><span class=c>$${((s._t||0)*rate).toFixed(2)}</span>${has?`<span onclick="event.stopPropagation();tog('${s.id}')" style="cursor:pointer;display:inline-block;width:14px">${open_.has(s.id)?'▾':'▸'}</span>`:''}${s.name}<div class=m>${has?k.length+' sub-sessions · ':''}${s._n} calls · ${s._l?new Date(s._l).toLocaleString():''}</div></div>`+(has&&open_.has(s.id)?k.slice().sort((a,b)=>b._l.localeCompare(a._l)).map(c=>row(c,d+1)).join(''):'')}
-function tog(id){open_.has(id)?open_.delete(id):open_.add(id);draw()}
-function draw(){build();const q=$('q').value.toLowerCase();
-const list=q?all.filter(s=>(s.name+(s.repo||'')).toLowerCase().includes(q)).map(s=>row({...s,id:s.id},0).replace(/▾|▸/,'')):all.filter(s=>!s.parent||!byId[s.parent]).sort((a,b)=>b._l.localeCompare(a._l)).map(s=>row(s,0));
-$('list').innerHTML=list.join('')}
-async function show(id,quiet){try{await show_(id,quiet)}catch(e){$('r').innerHTML='<div class=m>Error: '+e.message+'</div>'}}
-async function show_(id,quiet){sel=id;if(!quiet)draw();const d=await (await fetch('/api/session?id='+encodeURIComponent(id))).json(),cl=(await (await fetch('/api/calls?id='+encodeURIComponent(id))).json()).rows;
-if(sel!==id)return;const t=d.rows.reduce((a,r)=>a+(r.aiu||0),0),s=all.find(x=>x.id===id)||{};
-$('r').innerHTML=`<b>${s?.name||id}</b><div class=m>${id}</div><div class=big>$${(t*rate).toFixed(2)}</div><div class=m>${t.toFixed(1)} AIU (assumes 1 AIU = $${rate})</div>
-${(kids[id]||[]).length?`<div class=m>Including ${kids[id].length} sub-sessions: <b style='color:#3fb950'>$${((s._t||0)*rate).toFixed(2)}</b></div><table><tr><th>Sub-session<th>Calls<th>Cost (incl. children)</tr>${kids[id].slice().sort((a,b)=>b._t-a._t).map(k=>`<tr><td>${k.name}<td>${k._n}<td>$${(k._t*rate).toFixed(2)}</tr>`).join('')}</table>`:''}<table><tr><th>Model<th>Calls<th>Input<th>Output<th>Cache R<th>Cache W<th>AIU</tr>${d.rows.map(r=>`<tr><td>${r.model||'(unknown)'}<td>${r.calls}<td>${f(r.inp)}<td>${f(r.outp)}<td>${f(r.cr)}<td>${f(r.cw)}<td>${(r.aiu||0).toFixed(1)}</tr>`).join('')}</table>${rates(cl)}`}
+function build(){
+  byId={};kids={};all.forEach(s=>{byId[s.id]=s;kids[s.id]=[]});
+  all.forEach(s=>{if(s.parent&&byId[s.parent])kids[s.parent].push(s)});
+  const roll=s=>{
+    if(s._t!==undefined)return s;
+    s._t=s.aiu;s._n=s.calls;s._p=s.calls-s.unpriced_calls;s._x=s.external_calls;s._l=s.last_at||'';
+    kids[s.id].forEach(k=>{roll(k);s._t+=k._t;s._n+=k._n;s._p+=k._p;s._x+=k._x;if(k._l>s._l)s._l=k._l});
+    return s;
+  };
+  all.forEach(s=>{delete s._t});all.forEach(roll);
+}
+function row(s,depth,flat=false){
+  const children=kids[s.id],has=children.length;
+  return `<div class="s ${s.id===sel?'a':''}" data-session="${esc(s.id)}" style="padding-left:${12+depth*16}px"><span class=c>${s._p?money(s._t):'—'}</span>${has&&!flat?`<span data-toggle="${esc(s.id)}" style="cursor:pointer;display:inline-block;width:14px">${open_.has(s.id)?'▾':'▸'}</span>`:''}${esc(s.name)}<div class=m>${has?has+' sub-sessions · ':''}${s._n} calls${s._x?' · '+s._x+' external':''} · ${s._l?esc(new Date(s._l).toLocaleString()):''}</div></div>`+
+    (has&&!flat&&open_.has(s.id)?children.slice().sort((a,b)=>b._l.localeCompare(a._l)).map(child=>row(child,depth+1)).join(''):'');
+}
+function draw(){
+  build();const q=$('q').value.toLowerCase();
+  const list=q?all.filter(s=>(s.name+(s.repo||'')).toLowerCase().includes(q)).map(s=>row(s,0,true)):
+    all.filter(s=>!s.parent||!byId[s.parent]).sort((a,b)=>b._l.localeCompare(a._l)).map(s=>row(s,0));
+  $('list').innerHTML=list.join('');
+}
+async function show(id,quiet){
+  try{await showSession(id,quiet)}catch(error){$('r').textContent=`Error: ${error.message}`}
+}
+async function showSession(id,quiet){
+  sel=id;if(!quiet)draw();
+  const data=await api('/api/session?id='+encodeURIComponent(id)),cl=(await api('/api/calls?id='+encodeURIComponent(id))).rows;
+  if(sel!==id)return;
+  const total=data.rows.reduce((a,r)=>a+(r.aiu??0),0),costed=data.rows.reduce((a,r)=>a+r.calls-r.unpriced_calls,0);
+  const unpriced=data.rows.reduce((a,r)=>a+r.unpriced_calls,0),s=all.find(x=>x.id===id)||{};
+  $('r').innerHTML=`<b>${esc(s.name||id)}</b><div class=m>${esc(id)}</div><div class=big>${costed?money(total):'—'}</div>
+  <div class=m>Copilot AIU estimate · external provider charges not included</div>
+  <div class=m>${total.toFixed(1)} AIU (assumes 1 AIU = $${rate})${unpriced?` · ${f(unpriced)} calls without reported AIU`:''}</div>
+  ${(kids[id]||[]).length?`<div class=m>Including ${kids[id].length} sub-sessions: <b style="color:#3fb950">${s._p?money(s._t):'—'}</b></div>
+  <table><tr><th>Sub-session<th>Calls<th>Copilot estimate (incl. children)</tr>${kids[id].slice().sort((a,b)=>b._t-a._t).map(k=>`<tr data-session="${esc(k.id)}" style="cursor:pointer"><td>${esc(k.name)}<td>${k._n}<td>${k._p?money(k._t):'—'}</tr>`).join('')}</table>`:''}
+  <table class=model-table><tr><th>Model<th>Source<th>Calls<th>Input<th>Output<th>Cache R<th>Cache W<th>AIU</tr>${data.rows.map(r=>`<tr><td data-label="Model">${model(r)}<td data-label="Source">${esc(source(r))}<td data-label="Calls">${f(r.calls)}<td data-label="Input">${f(r.inp)}<td data-label="Output">${f(r.outp)}<td data-label="Cache R">${f(r.cr)}<td data-label="Cache W">${f(r.cw)}<td data-label="AIU">${r.aiu==null?'—':r.aiu.toFixed(1)}</tr>`).join('')}</table>${rates(cl)}`;
+}
 const PAL=['#3fb950','#58a6ff','#d29922','#f778ba','#a371f7','#ff7b72','#79c0ff','#56d364'];
-async function showWin(i){sel='win'+i;draw();const [name,from,to]=WIN[i],bucket=i>=3?'day':(i<=1?'hour':'day');
-const q=`from=${from.toISOString()}${to?'&to='+to.toISOString():''}&bucket=${i<=1?'hour':'day'}`;
-const d=await (await fetch('/api/window?'+q)).json(),$$=v=>'$'+(v*rate).toFixed(2);
-const tot=k=>d.models.reduce((a,m)=>a+m[k],0),T=tot('aiu'),inp=tot('inp'),cr=tot('cr'),cw=tot('cw'),out=tot('outp'),calls=tot('calls');
-const mi={};d.models.forEach((m,j)=>mi[m.model]=PAL[j%PAL.length]);
-const bs=[...new Set(d.buckets.map(b=>b.b))],by={};d.buckets.forEach(b=>{(by[b.b]=by[b.b]||{})[b.model]=b.aiu});
-const mx=Math.max(1,...bs.map(b=>Object.values(by[b]).reduce((a,v)=>a+v,0)));
-const bars=bs.map(b=>`<div title="${b}: ${$$(Object.values(by[b]).reduce((a,v)=>a+v,0))}" style="flex:1;min-width:6px;display:flex;flex-direction:column-reverse;margin-right:2px">${Object.entries(by[b]).map(([m,v])=>`<div style="background:${mi[m]};height:${v/mx*90}px"></div>`).join('')}</div>`).join('');
-const label=bs.length?`<div class=m style="display:flex;justify-content:space-between"><span>${bs[0]}</span><span>${bs[bs.length-1]}</span></div>`:'';
-$('r').innerHTML=`<b>${name}</b> <span class=m>all sessions</span><div class=big>${$$(T)}</div><div class=m>${T.toFixed(1)} AIU · ${f(calls)} calls · avg ${$$(calls?T/calls:0)}/call</div>
-<div class=m style="margin-top:10px">Cache hit: <b>${inp?Math.round(cr/inp*100):0}%</b> of input tokens read from cache · ${f(inp)} in · ${f(out)} out · ${f(cr)} cache read · ${f(cw)} cache write</div>
-<h4>Cost per ${i<=1?'hour':'day'}, by model</h4><div style="height:94px;display:flex;align-items:flex-end">${bars||'<span class=m>No usage</span>'}</div>${label}
-<table><tr><th>Model<th>Calls<th>Input<th>Output<th>Cache R<th>Cache W<th>Share<th>Cost</tr>${d.models.map(m=>`<tr><td><span style="color:${mi[m.model]}">■</span> ${m.model}<td>${f(m.calls)}<td>${f(m.inp)}<td>${f(m.outp)}<td>${f(m.cr)}<td>${f(m.cw)}<td>${T?Math.round(m.aiu/T*100):0}%<td>${$$(m.aiu)}</tr>`).join('')}</table>
-<h4>Top sessions</h4><table><tr><th>Session<th>Calls<th>Cost</tr>${d.top.map(s=>`<tr style="cursor:pointer" onclick="show('${s.id}')"><td>${s.name}<td>${s.calls}<td>${$$(s.aiu)}</tr>`).join('')}</table>`}
-function rates(cl){if(!cl.length)return'';const now=Date.now(),sum=a=>a.reduce((x,r)=>x+r.aiu,0)*rate,$$=v=>'$'+v.toFixed(2);
-const win=m=>cl.filter(r=>now-new Date(r.t)<m*6e4);const w=[['Last call',cl.slice(0,1)],['Last 10 calls',cl.slice(0,10)],['Last 15 min',win(15)],['Last hour',win(60)]];
-const hr=sum(win(60)),act=win(60);const span=act.length>1?(new Date(act[0].t)-new Date(act[act.length-1].t))/36e5:0;
-const mx=Math.max(...cl.slice(0,40).map(r=>r.aiu)),bars=cl.slice(0,40).reverse().map(r=>`<span title="${r.model||'(unknown)'} ${$$(r.aiu*rate)}" style="display:inline-block;width:6px;margin-right:1px;background:#3fb950;height:${Math.max(2,r.aiu/mx*40)}px"></span>`).join('');
-return`<h4>Rate of change</h4><table><tr><th>Window<th>Calls<th>Cost<th>Avg/call</tr>${w.map(([n,a])=>`<tr><td>${n}<td>${a.length}<td>${$$(sum(a))}<td>${a.length?$$(sum(a)/a.length):'-'}</tr>`).join('')}</table>
-<div class=m style="margin-top:8px">Burn rate (active span in last hr): ${span>.01?$$(hr/span)+'/hr':'n/a'} · idle for ${Math.round((now-new Date(cl[0].t))/6e4)} min</div>
-<div class=m style="margin-top:10px">Cost per call, last 40 (oldest → newest)</div><div style="height:44px;display:flex;align-items:flex-end;margin-top:4px">${bars}</div>
-<h4>Recent calls</h4><table><tr><th>Time<th>Model<th>In<th>Out<th>Cost</tr>${cl.slice(0,10).map(r=>`<tr><td>${new Date(r.t).toLocaleTimeString()}<td>${r.model||'(unknown)'}<td>${f(r.inp)}<td>${f(r.outp)}<td>${$$(r.aiu*rate)}</tr>`).join('')}</table>`}
-$('q').oninput=draw;load();setInterval(load,30000);
+async function showWin(i){
+  try{await showWindow(i)}catch(error){$('r').textContent=`Error: ${error.message}`}
+}
+async function showWindow(i){
+  sel='win'+i;draw();const [name,from,to]=WIN[i];
+  const q=`from=${from.toISOString()}${to?'&to='+to.toISOString():''}&bucket=${i<=1?'hour':'day'}`;
+  const data=await api('/api/window?'+q);
+  if(sel!=='win'+i)return;
+  const sum=k=>data.models.reduce((a,m)=>a+(m[k]??0),0),total=sum('aiu'),inp=sum('inp'),cr=sum('cr'),cw=sum('cw'),out=sum('outp'),calls=sum('calls'),unpriced=sum('unpriced_calls'),costed=calls-unpriced;
+  const colors=new Map(data.models.map((m,j)=>[modelKey(m),PAL[j%PAL.length]])),by=new Map();
+  data.buckets.forEach(b=>{const bucket=by.get(b.b)||new Map();bucket.set(modelKey(b),b.aiu);by.set(b.b,bucket)});
+  const bs=[...by.keys()],mx=Math.max(1,...bs.map(b=>[...by.get(b).values()].reduce((a,v)=>a+v,0)));
+  const bars=bs.map(b=>`<div title="${esc(b)}: ${money([...by.get(b).values()].reduce((a,v)=>a+v,0))}" style="flex:1;min-width:6px;display:flex;flex-direction:column-reverse;margin-right:2px">${[...by.get(b)].map(([key,v])=>`<div style="background:${colors.get(key)};height:${v/mx*90}px"></div>`).join('')}</div>`).join('');
+  const label=bs.length?`<div class=m style="display:flex;justify-content:space-between"><span>${esc(bs[0])}</span><span>${esc(bs[bs.length-1])}</span></div>`:'';
+  $('r').innerHTML=`<b>${esc(name)}</b> <span class=m>all sessions</span><div class=big>${costed?money(total):'—'}</div>
+  <div class=m>Copilot AIU estimate · external provider charges not included</div>
+  <div class=m>${total.toFixed(1)} AIU · ${f(calls)} calls · avg ${costed?money(total/costed):'—'}/priced call${unpriced?` · ${f(unpriced)} unpriced`:''}</div>
+  <div class=m style="margin-top:10px">Cache hit: <b>${inp?Math.round(cr/inp*100):0}%</b> of input tokens read from cache · ${f(inp)} in · ${f(out)} out · ${f(cr)} cache read · ${f(cw)} cache write</div>
+  <h4>Copilot AIU estimate per ${i<=1?'hour':'day'}, by model</h4><div style="height:94px;display:flex;align-items:flex-end">${bars||'<span class=m>No usage</span>'}</div>${label}
+  <table class=model-table><tr><th>Model<th>Source<th>Calls<th>Input<th>Output<th>Cache R<th>Cache W<th>Share<th>Copilot estimate</tr>${data.models.map(m=>`<tr><td data-label="Model"><span style="color:${colors.get(modelKey(m))}">■</span> ${model(m)}<td data-label="Source">${esc(source(m))}<td data-label="Calls">${f(m.calls)}<td data-label="Input">${f(m.inp)}<td data-label="Output">${f(m.outp)}<td data-label="Cache R">${f(m.cr)}<td data-label="Cache W">${f(m.cw)}<td data-label="Share">${m.aiu==null?'—':total?Math.round(m.aiu/total*100)+'%':'0%'}<td data-label="Copilot estimate">${m.aiu==null?'—':money(m.aiu)}</tr>`).join('')}</table>
+  <h4>Top sessions</h4><table><tr><th>Session<th>Calls<th>Copilot estimate</tr>${data.top.map(s=>`<tr style="cursor:pointer" data-session="${esc(s.id)}"><td>${esc(s.name)}<td>${s.calls}<td>${priced(s.calls,s.unpriced_calls)?money(s.aiu):'—'}</tr>`).join('')}</table>`;
+}
+function rates(cl){
+  if(!cl.length)return '';
+  const now=Date.now(),costed=a=>a.filter(r=>r.aiu!=null),sum=a=>a.reduce((x,r)=>x+(r.aiu??0),0);
+  const win=m=>cl.filter(r=>r.t&&now-new Date(r.t)<m*6e4),w=[['Last call',cl.slice(0,1)],['Last 10 calls',cl.slice(0,10)],['Last 15 min',win(15)],['Last hour',win(60)]];
+  const act=win(60),span=act.length>1?(new Date(act[0].t)-new Date(act[act.length-1].t))/36e5:0;
+  const mx=Math.max(0,...cl.slice(0,40).map(r=>r.aiu??0));
+  const bars=cl.slice(0,40).reverse().map(r=>`<span title="${esc(r.model||'(unknown)')} ${r.aiu==null?'unpriced':money(r.aiu)}" style="display:inline-block;width:6px;margin-right:1px;background:${r.aiu==null?'#484f58':'#3fb950'};height:${r.aiu!=null&&mx?Math.max(2,r.aiu/mx*40):2}px"></span>`).join('');
+  const idle=cl[0].t?`${Math.round((now-new Date(cl[0].t))/6e4)} min`:'unknown';
+  return `<h4>Rate of change</h4><table><tr><th>Window<th>Calls<th>Copilot estimate<th>Avg/priced call</tr>${w.map(([n,a])=>`<tr><td>${n}<td>${a.length}<td>${costed(a).length?money(sum(a)):'—'}<td>${costed(a).length?money(sum(a)/costed(a).length):'—'}</tr>`).join('')}</table>
+  <div class=m style="margin-top:8px">Copilot AIU burn rate (active span in last hr): ${span>.01&&costed(act).length?money(sum(act)/span)+'/hr':'n/a'} · idle for ${esc(idle)}</div>
+  <div class=m style="margin-top:10px">Copilot AIU cost per call, last 40 (oldest → newest; gray = unpriced)</div><div style="height:44px;display:flex;align-items:flex-end;margin-top:4px">${bars}</div>
+  <h4>Recent calls</h4><table><tr><th>Time<th>Model<th>Source<th>In<th>Out<th>Copilot estimate</tr>${cl.slice(0,10).map(r=>`<tr><td>${r.t?esc(new Date(r.t).toLocaleTimeString()):'—'}<td>${esc(r.model||'(unknown)')}<td>${esc(source(r))}<td>${f(r.inp)}<td>${f(r.outp)}<td>${r.aiu==null?'—':money(r.aiu)}</tr>`).join('')}</table>`;
+}
+$('q').oninput=draw;
+$('rf').onclick=load;
+$('tot').onclick=e=>{const target=e.target.closest('[data-window]');if(target)showWin(+target.dataset.window)};
+$('list').onclick=e=>{
+  const toggle=e.target.closest('[data-toggle]');
+  if(toggle){open_.has(toggle.dataset.toggle)?open_.delete(toggle.dataset.toggle):open_.add(toggle.dataset.toggle);draw();return}
+  const target=e.target.closest('[data-session]');if(target)show(target.dataset.session);
+};
+$('r').onclick=e=>{const target=e.target.closest('[data-session]');if(target)show(target.dataset.session)};
+load();checkUpdate();setInterval(load,30000);setInterval(checkUpdate,60000);
 </script>
