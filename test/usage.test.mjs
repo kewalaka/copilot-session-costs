@@ -234,7 +234,16 @@ test("reports unreadable and malformed logs while retaining the last successful 
   deny = false;
   f.usage.refresh();
   assert.equal(f.rows().length, 1);
-  assert.match(f.usage.warnings.join(" "), /malformed usage event/);
+  assert.match(f.usage.warnings.join(" "), /malformed JSONL line/);
+});
+
+test("warns when a JSONL line is truncated before the usage event type is complete", (t) => {
+  const f = fixture(t);
+  const file = f.log("one", []);
+  writeFileSync(file, '{"type":"session.usage_rec');
+  f.usage.refresh();
+  assert.equal(f.rows().length, 0);
+  assert.match(f.usage.warnings.join(" "), /1 malformed JSONL line/);
 });
 
 test("refreshes legacy database changes made by another connection", (t) => {

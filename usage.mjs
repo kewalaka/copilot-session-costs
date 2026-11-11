@@ -109,7 +109,7 @@ function parseLog(contents, sessionId) {
   const lines = contents.split("\n");
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
-    if (!line.includes('"session.usage_record"')) continue;
+    if (!line.trim()) continue;
     let event;
     try {
       event = JSON.parse(line);
@@ -117,7 +117,7 @@ function parseLog(contents, sessionId) {
       malformed++;
       continue;
     }
-    if (event.type !== "session.usage_record") continue;
+    if (!event || typeof event !== "object" || event.type !== "session.usage_record") continue;
     const usage = event.data?.usage;
     if (!usage || typeof usage !== "object") {
       invalid++;
@@ -166,7 +166,7 @@ function parseLog(contents, sessionId) {
     });
   }
   const warnings = [];
-  if (malformed) warnings.push(`${sessionId}: ${malformed} malformed usage event${malformed === 1 ? "" : "s"}`);
+  if (malformed) warnings.push(`${sessionId}: ${malformed} malformed JSONL line${malformed === 1 ? "" : "s"}`);
   if (invalid) warnings.push(`${sessionId}: ${invalid} usage event${invalid === 1 ? "" : "s"} with missing or invalid fields`);
   if (unidentifiable) warnings.push(`${sessionId}: ${unidentifiable} usage event${unidentifiable === 1 ? "" : "s"} without a stable ID cannot be deduplicated across sessions`);
   if (unattributed) warnings.push(`${sessionId}: ${unattributed} usage event${unattributed === 1 ? "" : "s"} without an accounting source may not be deduplicated across sessions`);
@@ -384,7 +384,7 @@ export class UsageStore {
       merged.push({
         ...record,
         fileSession: matches.some((candidate) => candidate.fileSession === record.sourceSession) ? record.sourceSession : record.fileSession,
-        aiu: record.aiu ?? matches.find((candidate) => candidate.aiu != null)?.aiu ?? null,
+        aiu: record.billingSource === "external" ? record.aiu : record.aiu ?? matches.find((candidate) => candidate.aiu != null)?.aiu ?? null,
       });
     }
     this.mergeWarnings = conflicts ? [`${conflicts} duplicate usage identit${conflicts === 1 ? "y has" : "ies have"} conflicting data`] : [];
